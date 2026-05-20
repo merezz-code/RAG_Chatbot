@@ -1,0 +1,23 @@
+# Aller à la racine du monorepo ui
+cd src\ui
+
+# Installer toutes les dépendances
+pnpm install
+
+# Builder tous les packages internes
+pnpm --filter "@intel-enterprise-rag-ui/utils" build
+pnpm --filter "@intel-enterprise-rag-ui/components" build
+pnpm --filter "@intel-enterprise-rag-ui/auth" build
+pnpm --filter "@intel-enterprise-rag-ui/chat" build
+pnpm --filter "@intel-enterprise-rag-ui/layouts" build
+pnpm --filter "@intel-enterprise-rag-ui/icons" build
+pnpm --filter "@intel-enterprise-rag-ui/markdown" build
+pnpm --filter "@intel-enterprise-rag-ui/input-validation" build
+pnpm --filter "@intel-enterprise-rag-ui/control-plane" build
+pnpm --filter "@intel-enterprise-rag-ui/tailwind-theme" build
+
+# Ou builder tout en une commande
+pnpm -r build
+
+# Ensuite lancer chatqna
+pnpm --filter chatqna dev
