@@ -55,9 +55,7 @@ export const ChatHistoryItem = ({
     "chat-history-item--pinned": pinned,
     "chat-history-item--unpinned": !pinned,
   });
-  console.log("ITEM DATA:", itemData);
-console.log("ITEM ID:", itemData.id);
-console.log("TYPE:", typeof itemData.id);
+  
 
   let titleElement = <p className="chat-history-item__title">{name}</p>;
   const titleOverflowLimit = pinned
