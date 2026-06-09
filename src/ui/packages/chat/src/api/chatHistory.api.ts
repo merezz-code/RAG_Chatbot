@@ -24,9 +24,15 @@ export const createChatHistoryApi = (keycloakService: KeycloakService) =>
     reducerPath: "chatHistoryApi",
     baseQuery: fetchBaseQuery({
       prepareHeaders: async (headers: Headers) => {
-       headers.set("Content-Type", "application/json");
-  return headers;
-      },
+    const token = localStorage.getItem("jwt");
+    const username = localStorage.getItem("username");
+    
+    
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    if (username) headers.set("X-User-Id", username);
+    headers.set("Content-Type", "application/json");
+    return headers;
+  },
     }),
     tagTypes: [CHATS_LIST_TAG, CHAT_ITEM_TAG],
     endpoints: (builder) => ({

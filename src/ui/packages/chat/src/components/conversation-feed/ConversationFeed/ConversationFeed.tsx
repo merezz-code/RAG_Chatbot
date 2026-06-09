@@ -19,10 +19,11 @@ import { ScrollToBottomButton } from "@/components/conversation-feed/ScrollToBot
 import { MemoizedUserMessage as UserMessage } from "@/components/conversation-feed/UserMessage/UserMessage";
 import { ChatTurn } from "@/types";
 
-const bottomMargin = 80; // margin to handle bottom scroll detection
+const bottomMargin = 80;
 
 interface ConversationFeedProps {
   conversationTurns: ChatTurn[];
+  conversationId?: string;      // ← new: passed down to FeedbackButton
   playingTurnId?: string | null;
   playingState?: PlaySpeechButtonState;
   onFileDownload: (fileName: string) => void;
@@ -31,6 +32,7 @@ interface ConversationFeedProps {
 
 export const ConversationFeed = ({
   conversationTurns,
+  conversationId,
   playingTurnId,
   playingState,
   onFileDownload,
@@ -64,16 +66,12 @@ export const ConversationFeed = ({
     }, 100),
   ).current;
 
-  // Only scroll when a new turn is added (conversation length increases)
   useEffect(() => {
     const currentLength = conversationTurns.length;
     const prevLength = prevConversationLengthRef.current;
-
-    // Scroll only when a new turn is added, not on initial render or streaming updates
     if (prevLength > 0 && currentLength > prevLength) {
       debouncedScrollToBottom("instant");
     }
-
     prevConversationLengthRef.current = currentLength;
   }, [conversationTurns.length, debouncedScrollToBottom]);
 
@@ -88,10 +86,8 @@ export const ConversationFeed = ({
     debouncedScrollToBottomButtonUpdate,
   ]);
 
-  // Set margin-bottom on pending turn programmatically to push user message to top
   useLayoutEffect(() => {
     const pendingTurn = conversationTurns.find((turn) => turn.isPending);
-    // Apply margin while turn is pending (includes waiting and streaming phases)
     const shouldApplyMargin = !!pendingTurn;
 
     const updatePendingTurnSpacing = () => {
@@ -103,8 +99,6 @@ export const ConversationFeed = ({
         const feedClientHeight = conversationFeedRef.current.clientHeight;
         const pendingTurnHeight =
           pendingTurnRef.current.getBoundingClientRect().height;
-
-        // Calculate margin needed: visible height - actual content height
         const BOT_MESSAGE_MARGIN_BOTTOM = 32;
         const marginBottom = Math.max(
           0,
@@ -114,10 +108,8 @@ export const ConversationFeed = ({
       }
     };
 
-    // Update immediately
     updatePendingTurnSpacing();
 
-    // If no pending turn, find and remove margin from all turns
     if (!shouldApplyMargin && conversationFeedRef.current) {
       const allTurns =
         conversationFeedRef.current.querySelectorAll(".conversation-turn");
@@ -126,26 +118,18 @@ export const ConversationFeed = ({
       });
     }
 
-    // Only observe if we should apply margin
-    if (!shouldApplyMargin) {
-      return;
-    }
+    if (!shouldApplyMargin) return;
 
-    // Also update on resize
     const resizeObserver = new ResizeObserver(updatePendingTurnSpacing);
     if (conversationFeedRef.current) {
       resizeObserver.observe(conversationFeedRef.current);
     }
-
-    // Observe pending turn for content changes
     if (pendingTurnRef.current) {
       resizeObserver.observe(pendingTurnRef.current);
     }
 
     return () => {
       resizeObserver.disconnect();
-      // Don't reset margin in cleanup - let the next effect handle it
-      // This prevents margin flicker during streaming updates
     };
   }, [conversationTurns]);
 
@@ -170,7 +154,6 @@ export const ConversationFeed = ({
         <div className="conversation-feed" data-testid="conversation-feed">
           {conversationTurns.map(
             ({ id, question, answer, error, isPending, sources }) => {
-              // Only pass active state if this turn matches the current playing turn
               const messagePlayingState: PlaySpeechButtonState =
                 playingTurnId === id ? (playingState ?? "idle") : "idle";
 
@@ -189,6 +172,8 @@ export const ConversationFeed = ({
                     isPending={isPending}
                     error={error}
                     sources={sources}
+                    question={question}              // ← passed for feedback
+                    conversationId={conversationId} // ← passed for feedback link
                     onFileDownload={onFileDownload}
                     onPlayMessage={onPlayMessage}
                     playingState={messagePlayingState}

@@ -16,12 +16,16 @@ import {
 } from "@/components/conversation-feed/PlaySpeechButton/PlaySpeechButton";
 import { PulsingDot } from "@/components/conversation-feed/PulsingDot/PulsingDot";
 import { SourcesGrid } from "@/components/sources/SourcesGrid/SourcesGrid";
+import { FeedbackButton } from "@/components/conversation-feed/FeedbackButton/FeedbackButton";
 import { ChatTurn } from "@/types";
+import { BugReportButton } from "../BugReportButton/BugReportButton";
 
 type BotMessageProps = Pick<
   ChatTurn,
   "id" | "answer" | "error" | "isPending" | "sources"
 > & {
+  question?: string;           // ← new: needed for the feedback email
+  conversationId?: string;     // ← new: link to conversation
   playingState?: PlaySpeechButtonState;
   onFileDownload: (fileName: string, bucketName: string) => void;
   onPlayMessage?: (turnId: string) => Promise<void>;
@@ -33,6 +37,8 @@ const BotMessage = ({
   error,
   isPending,
   sources,
+  question = "",
+  conversationId,
   playingState = "idle",
   onFileDownload,
   onPlayMessage,
@@ -61,6 +67,19 @@ const BotMessage = ({
                 onPlayMessage={onPlayMessage}
               />
             )}
+            {/* Feedback button — right next to Copy */}
+            <FeedbackButton
+              turnId={id}
+              question={question}
+              answer={sanitizedAnswer}
+              conversationId={conversationId}
+            />
+             <BugReportButton
+              turnId={id}
+              conversationId={conversationId}
+              question={question}
+              answer={sanitizedAnswer}
+            />
           </footer>
         )}
         {showSources && (

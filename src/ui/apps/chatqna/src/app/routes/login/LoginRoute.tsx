@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState , useEffect} from "react";
 import { useNavigate } from "react-router-dom";
 import { paths } from "@/config/paths";
 
@@ -28,13 +28,33 @@ export default function LoginRoute() {
   const [rPwd, setRPwd] = useState("");
   const [rPwd2, setRPwd2] = useState("");
   const [rErrors, setRErrors] = useState<Record<string, string>>({});
-
+  
   const validateEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 
   // Calcul de la force du mot de passe
   const strength = RULES.filter(r => r.test(rPwd)).length;
   const strengthPct = [0, 20, 45, 65, 85, 100][strength];
   const strengthColor = ["#E24B4A", "#E24B4A", "#EF9F27", "#EF9F27", "#1D9E75", "#1D9E75"][strength];
+  const [showResend, setShowResend] = useState(false);
+// Au début du composant, après les useState
+useEffect(() => {
+  const params = new URLSearchParams(window.location.search);
+  const verified = params.get("verified");
+  const reason = params.get("reason");
+
+  if (verified === "true") {
+    setAlert({ msg: "Compte activé ! Vous pouvez maintenant vous connecter.", type: "success" });
+  } else if (verified === "false") {
+    const msgs: Record<string, string> = {
+      expired: "Le lien d'activation a expiré. Reconnectez-vous pour en recevoir un nouveau.",
+      invalid: "Lien d'activation invalide.",
+      missing: "Token manquant.",
+    };
+    setAlert({ msg: msgs[reason ?? ""] ?? "Erreur d'activation.", type: "error" });
+  }
+  // Nettoyer l'URL
+  if (verified) window.history.replaceState({}, "", "/login");
+}, []);
 
   const handleLogin = async () => {
     const errs: Record<string, string> = {};
@@ -44,8 +64,6 @@ export default function LoginRoute() {
     if (Object.keys(errs).length > 0) return;
 
     setLoading(true);
-    setAlert({ msg: "Connexion en cours...", type: "success" });
-
     try {
       const res = await fetch("/api/v1/auth/login", {
         method: "POST",
@@ -53,18 +71,27 @@ export default function LoginRoute() {
         body: JSON.stringify({ email: lEmail, password: lPwd }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
 
-      localStorage.setItem("jwt",      data.token);
-localStorage.setItem("username", data.username);
-localStorage.setItem("email",    data.email);
-localStorage.setItem("isAdmin",  String(data.isAdmin));
-
-      if (data.mustChangePassword) {
-        navigate("/change-password");
-      } else {
-        navigate(paths.chat);
+      if (!res.ok) {
+        // Cas spécial : email non vérifié → proposer renvoi
+        if (data.code === "EMAIL_NOT_VERIFIED") {
+          setAlert({
+            msg: "Compte non activé. Vérifiez votre boîte mail ou ",
+            type: "error"
+          });
+          setShowResend(true);   // afficher le lien "renvoyer l'email"
+          return;
+        }
+        throw new Error(data.error);
       }
+
+      localStorage.setItem("jwt", data.token);
+      localStorage.setItem("username", data.username);
+      localStorage.setItem("email", data.email);
+      localStorage.setItem("isAdmin", String(data.isAdmin));
+
+      data.mustChangePassword ? navigate("/change-password") : navigate(paths.chat);
+
     } catch (err: any) {
       setAlert({ msg: err.message || "Erreur de connexion.", type: "error" });
     } finally {
@@ -91,10 +118,13 @@ localStorage.setItem("isAdmin",  String(data.isAdmin));
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      setAlert({ msg: "Compte créé ! Redirection...", type: "success" });
-      localStorage.setItem("jwt", data.token);
-      localStorage.setItem("username", data.username);
-      setTimeout(() => navigate(paths.chat), 1000);
+      // Pas de JWT — afficher message et basculer sur login
+      setAlert({
+        msg: "Compte créé ! Vérifiez votre boîte mail pour activer votre compte.",
+        type: "success"
+      });
+      setTimeout(() => setTab("login"), 3000);
+
     } catch (err: any) {
       setAlert({ msg: err.message || "Erreur d'inscription.", type: "error" });
     } finally {
@@ -102,169 +132,235 @@ localStorage.setItem("isAdmin",  String(data.isAdmin));
     }
   };
 
+  const oauthBtnStyle: React.CSSProperties = {
+    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    gap: 8, padding: '9px 12px', fontSize: 13, fontWeight: 500,
+    border: '0.5px solid var(--color-border-tertiary)',
+    borderRadius: 'var(--border-radius-md)',
+    background: 'var(--color-background-primary)',
+    color: 'var(--color-text-primary)', textDecoration: 'none',
+    cursor: 'pointer'
+  };
+
   return (
     <div className="auth-container">
-    <div className="auth-wrap">
-      <div className="card">
-        {/* Logo Section */}
-        <div className="logo">
-          <div className="logo-icon"><i className="ti ti-brain" /></div>
-          <span className="logo-text">MonRAG</span>
-        </div>
-
-        {/* Tabs Section */}
-        <div className="tab-row">
-          <button 
-            className={`tab ${tab === 'login' ? 'active' : ''}`} 
-            onClick={() => { setTab('login'); setAlert(null); }}
-          >
-            Connexion
-          </button>
-          <button 
-            className={`tab ${tab === 'register' ? 'active' : ''}`} 
-            onClick={() => { setTab('register'); setAlert(null); }}
-          >
-            Créer un compte
-          </button>
-        </div>
-
-        {/* Alert Message */}
-        {alert && (
-          <div className={`alert alert-${alert.type} show`}>
-            <i className={`ti ${alert.type === 'success' ? 'ti-circle-check' : 'ti-alert-circle'}`} />
-            <span>{alert.msg}</span>
+      <div className="auth-wrap">
+        <div className="card">
+          {/* Logo Section */}
+          <div className="logo">
+            <div className="logo-icon"><i className="ti ti-brain" /></div>
+            <span className="logo-text">MonRAG</span>
           </div>
-        )}
 
-        {/* FORMULAIRE DE CONNEXION */}
-        {tab === "login" && (
-          <div id="form-login">
-            <div className="field">
-              <label>Adresse e-mail</label>
-              <div className="input-wrap">
-                <input 
-                  type="email" 
-                  className={lErrors.email ? 'err' : ''}
-                  value={lEmail} 
-                  onChange={(e) => setLEmail(e.target.value)}
-                  placeholder="vous@exemple.com" 
-                />
-              </div>
-              {lErrors.email && <span className="err-msg show">{lErrors.email}</span>}
-            </div>
-
-            <div className="field">
-              <label>Mot de passe</label>
-              <div className="input-wrap">
-                <input 
-                  type={showPwd ? "text" : "password"} 
-                  className={lErrors.pwd ? 'err' : ''}
-                  value={lPwd}
-                  onChange={(e) => setLPwd(e.target.value)}
-                  placeholder="••••••••" 
-                />
-                <button className="eye-btn" onClick={() => setShowPwd(!showPwd)}>
-                  <i className={`ti ${showPwd ? 'ti-eye-off' : 'ti-eye'}`} />
-                </button>
-              </div>
-              {lErrors.pwd && <span className="err-msg show">{lErrors.pwd}</span>}
-            </div>
-
-            <button className="submit-btn" onClick={handleLogin} disabled={loading}>
-              {loading ? "Connexion..." : "Se connecter"}
+          {/* Tabs Section */}
+          <div className="tab-row">
+            <button
+              className={`tab ${tab === 'login' ? 'active' : ''}`}
+              onClick={() => { setTab('login'); setAlert(null); }}
+            >
+              Connexion
             </button>
-            <p className="first-login-note">Première connexion ? Vous serez invité à changer votre mot de passe.</p>
-          </div>
-        )}
-
-        {/* FORMULAIRE D'INSCRIPTION */}
-        {tab === "register" && (
-          <div id="form-register">
-            <div className="field">
-              <label>Nom d'utilisateur</label>
-              <div className="input-wrap">
-                <input 
-                  type="text" 
-                  className={rErrors.name ? 'err' : ''}
-                  value={rName}
-                  onChange={(e) => setRName(e.target.value)}
-                  placeholder="jean.dupont" 
-                />
-              </div>
-              {rErrors.name && <span className="err-msg show">{rErrors.name}</span>}
-            </div>
-
-            <div className="field">
-              <label>Adresse e-mail</label>
-              <div className="input-wrap">
-                <input 
-                  type="email" 
-                  className={rErrors.email ? 'err' : ''}
-                  value={rEmail}
-                  onChange={(e) => setREmail(e.target.value)}
-                  placeholder="vous@exemple.com" 
-                />
-              </div>
-              {rErrors.email && <span className="err-msg show">{rErrors.email}</span>}
-            </div>
-
-            <div className="field">
-              <label>Mot de passe</label>
-              <div className="input-wrap">
-                <input 
-                  type={showPwd ? "text" : "password"} 
-                  className={rErrors.pwd ? 'err' : ''}
-                  value={rPwd}
-                  onChange={(e) => setRPwd(e.target.value)}
-                  placeholder="••••••••" 
-                />
-                <button className="eye-btn" onClick={() => setShowPwd(!showPwd)}>
-                  <i className={`ti ${showPwd ? 'ti-eye-off' : 'ti-eye'}`} />
-                </button>
-              </div>
-              
-            </div>
-
-            <div className="rules show">
-              {RULES.map(rule => {
-                const isOk = rule.test(rPwd);
-                return (
-                  <div key={rule.id} className={`rule ${isOk ? 'ok' : 'fail'}`}>
-                    <i className={`ti ${isOk ? 'ti-circle-check' : 'ti-circle-x'}`} />
-                    {rule.label}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="field" style={{ marginTop: 14 }}>
-              <label>Confirmer le mot de passe</label>
-              <div className="input-wrap">
-                <input 
-                  type="password" 
-                  className={rErrors.pwd2 ? 'err' : ''}
-                  value={rPwd2}
-                  onChange={(e) => setRPwd2(e.target.value)}
-                  placeholder="••••••••" 
-                />
-              </div>
-              {rErrors.pwd2 && <span className="err-msg show">{rErrors.pwd2}</span>}
-            </div>
-
-            <button className="submit-btn" onClick={handleRegister} disabled={loading}>
-              {loading ? "Création..." : "Créer le compte"}
+            <button
+              className={`tab ${tab === 'register' ? 'active' : ''}`}
+              onClick={() => { setTab('register'); setAlert(null); }}
+            >
+              Créer un compte
             </button>
           </div>
-        )}
 
-        <p className="switch-text">
-          {tab === 'login' ? (
-            <>Pas encore de compte ? <a onClick={() => setTab('register')}>Créer un compte</a></>
-          ) : (
-            <>Déjà un compte ? <a onClick={() => setTab('login')}>Se connecter</a></>
+          {/* Alert Message */}
+          {alert && (
+            <div className={`alert alert-${alert.type} show`}>
+              <i className={`ti ${alert.type === 'success' ? 'ti-circle-check' : 'ti-alert-circle'}`} />
+              <span>{alert.msg}</span>
+            </div>
           )}
-        </p>
-      </div>
+
+          {/* FORMULAIRE DE CONNEXION */}
+          {tab === "login" && (
+            <div id="form-login">
+              <div className="field">
+                <label>Adresse e-mail</label>
+                <div className="input-wrap">
+                  <input
+                    type="email"
+                    className={lErrors.email ? 'err' : ''}
+                    value={lEmail}
+                    onChange={(e) => setLEmail(e.target.value)}
+                    placeholder="vous@exemple.com"
+                  />
+                </div>
+                {lErrors.email && <span className="err-msg show">{lErrors.email}</span>}
+              </div>
+
+              <div className="field">
+                <label>Mot de passe</label>
+                <div className="input-wrap">
+                  <input
+                    type={showPwd ? "text" : "password"}
+                    className={lErrors.pwd ? 'err' : ''}
+                    value={lPwd}
+                    onChange={(e) => setLPwd(e.target.value)}
+                    placeholder="••••••••"
+                  />
+                  <button className="eye-btn" onClick={() => setShowPwd(!showPwd)}>
+                    <i className={`ti ${showPwd ? 'ti-eye-off' : 'ti-eye'}`} />
+                  </button>
+                </div>
+                {lErrors.pwd && <span className="err-msg show">{lErrors.pwd}</span>}
+              </div>
+
+              <button className="submit-btn" onClick={handleLogin} disabled={loading}>
+                {loading ? "Connexion..." : "Se connecter"}
+              </button>
+
+            </div>
+          )}
+
+          {/* FORMULAIRE D'INSCRIPTION */}
+          {tab === "register" && (
+            <div id="form-register">
+              <div className="field">
+                <label>Nom d'utilisateur</label>
+                <div className="input-wrap">
+                  <input
+                    type="text"
+                    className={rErrors.name ? 'err' : ''}
+                    value={rName}
+                    onChange={(e) => setRName(e.target.value)}
+                    placeholder="jean.dupont"
+                  />
+                </div>
+                {rErrors.name && <span className="err-msg show">{rErrors.name}</span>}
+              </div>
+
+              <div className="field">
+                <label>Adresse e-mail</label>
+                <div className="input-wrap">
+                  <input
+                    type="email"
+                    className={rErrors.email ? 'err' : ''}
+                    value={rEmail}
+                    onChange={(e) => setREmail(e.target.value)}
+                    placeholder="vous@exemple.com"
+                  />
+                </div>
+                {rErrors.email && <span className="err-msg show">{rErrors.email}</span>}
+              </div>
+
+              <div className="field">
+                <label>Mot de passe</label>
+                <div className="input-wrap">
+                  <input
+                    type={showPwd ? "text" : "password"}
+                    className={rErrors.pwd ? 'err' : ''}
+                    value={rPwd}
+                    onChange={(e) => setRPwd(e.target.value)}
+                    placeholder="••••••••"
+                  />
+                  <button className="eye-btn" onClick={() => setShowPwd(!showPwd)}>
+                    <i className={`ti ${showPwd ? 'ti-eye-off' : 'ti-eye'}`} />
+                  </button>
+                </div>
+
+              </div>
+
+              <div className="rules show">
+                {RULES.map(rule => {
+                  const isOk = rule.test(rPwd);
+                  return (
+                    <div key={rule.id} className={`rule ${isOk ? 'ok' : 'fail'}`}>
+                      <i className={`ti ${isOk ? 'ti-circle-check' : 'ti-circle-x'}`} />
+                      {rule.label}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="field" style={{ marginTop: 14 }}>
+                <label>Confirmer le mot de passe</label>
+                <div className="input-wrap">
+                  <input
+                    type="password"
+                    className={rErrors.pwd2 ? 'err' : ''}
+                    value={rPwd2}
+                    onChange={(e) => setRPwd2(e.target.value)}
+                    placeholder="••••••••"
+                  />
+                </div>
+                {rErrors.pwd2 && <span className="err-msg show">{rErrors.pwd2}</span>}
+              </div>
+
+              <button className="submit-btn" onClick={handleRegister} disabled={loading}>
+                {loading ? "Création..." : "Créer le compte"}
+              </button>
+              {showResend && (
+                <p style={{ textAlign: "center", fontSize: 13, marginTop: 10 }}>
+                  <a
+                    style={{
+                      color: "#7F77DD",
+                      cursor: "pointer",
+                      fontWeight: 500,
+                    }}
+                    onClick={async () => {
+                      await fetch("/api/v1/auth/resend-verification", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ email: lEmail }),
+                      });
+
+                      setAlert({
+                        msg: "Email de vérification renvoyé.",
+                        type: "success",
+                      });
+
+                      setShowResend(false);
+                    }}
+                  >
+                    Renvoyer l'email d'activation
+                  </a>
+                </p>
+              )}
+            </div>
+          )}
+
+          <p className="switch-text">
+            {tab === 'login' ? (
+              <>Pas encore de compte ? <a onClick={() => setTab('register')}>Créer un compte</a></>
+            ) : (
+              <>Déjà un compte ? <a onClick={() => setTab('login')}>Se connecter</a></>
+            )}
+          </p>
+          {/* Séparateur */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '16px 0' }}>
+            <div style={{ flex: 1, height: 1, background: 'var(--color-border-tertiary)' }} />
+            <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>ou continuer avec</span>
+            <div style={{ flex: 1, height: 1, background: 'var(--color-border-tertiary)' }} />
+          </div>
+
+          {/* Boutons OAuth */}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <a href="http://localhost:5000/api/v1/auth/oauth/google" style={oauthBtnStyle}>
+              <svg width="16" height="16" viewBox="0 0 48 48">
+                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+              </svg>
+              Google
+            </a>
+            <a href="/api/v1/auth/oauth/microsoft" style={oauthBtnStyle}>
+              <svg width="16" height="16" viewBox="0 0 21 21">
+                <rect x="1" y="1" width="9" height="9" fill="#F25022" />
+                <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
+                <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
+                <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
+              </svg>
+              Microsoft
+            </a>
+          </div>
+        </div>
+
       </div>
 
       <style>{`

@@ -29,6 +29,7 @@ const AdminPanelRoute = lazy(
 
 import LoginRoute from "@/app/routes/login/LoginRoute";
 import { authUtils } from "@/utils/auth";
+import OAuthCallbackRoute from "./routes/login/OAuthCallbackRoute";
 
 // Guard simple
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -50,6 +51,7 @@ const router = createBrowserRouter([
     path: "/login",
     element: <LoginRoute />,
   },
+  { path: "/auth/callback", element: <OAuthCallbackRoute /> },
 
   // Routes protégées
   {

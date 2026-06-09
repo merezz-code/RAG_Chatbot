@@ -12,11 +12,14 @@ import { keycloakService } from "@/utils/auth";
 const AUTHORIZED_ENDPOINTS = ["getFilePresignedUrl", "downloadFile"];
 
 const appBaseQuery = fetchBaseQuery({
-  prepareHeaders: async (headers, api) => {
-    if (AUTHORIZED_ENDPOINTS.includes(api.endpoint)) {
-      await keycloakService.refreshToken();
-      headers.set("Authorization", `Bearer ${keycloakService.getToken()}`);
-    }
+  prepareHeaders: async (headers: Headers) => {
+    const token = localStorage.getItem("jwt");
+    const username = localStorage.getItem("username");
+    
+    
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    if (username) headers.set("X-User-Id", username);
+    headers.set("Content-Type", "application/json");
     return headers;
   },
 });
