@@ -29,14 +29,17 @@ import {
 } from "@/features/admin-panel/control-plane/utils/api";
 import { getErrorMessage, transformErrorMessage } from "@/utils/api";
 import { keycloakService } from "@/utils/auth";
+import { llmInputGuardArgumentsDefault }
+from "@/features/admin-panel/control-plane/config/chat-qna-graph/guards/llmInputGuard";
 
+import { llmOutputGuardArgumentsDefault }
+from "@/features/admin-panel/control-plane/config/chat-qna-graph/guards/llmOutputGuard";
 // Fonction utilitaire pour garantir un header Authorization valide pour le "Ghost Mode"
 const getAuthHeader = () => {
   const token = keycloakService.getToken();
   // Si pas de token (mode fantôme), on envoie une chaîne factice pour éviter le 403 du filtre JWT
   return token ? `Bearer ${token}` : "Bearer ghost-token-placeholder";
 };
-
 const controlPlaneBaseQuery = fetchBaseQuery({
 
 });
@@ -107,23 +110,20 @@ const parsedParams = rawParams && !Array.isArray(rawParams)
   : parseServicesParameters({} as any);
 
 // ✅ Garantir valeurs par défaut pour TOUS les scanners
-const defaultScanners = {
-  prompt_injection_scanner: { enabled: false },
-  ban_substrings_scanner:   { enabled: false, substrings: [] },
-  code_scanner:             { enabled: false },
-  invisible_text_scanner:   { enabled: false },
-  regex_scanner:            { enabled: false, patterns: [] },
-  secrets_scanner:          { enabled: false },
-  sentiment_scanner:        { enabled: false, threshold: 0.0 },
-  token_limit_scanner:      { enabled: false, limit: 1000, encoding_name: "cl100k_base" },
-  toxicity_scanner:         { enabled: false, threshold: 0.5, match_type: "full_match" },
-};
+
 
 const parameters = {
   ...parsedParams,
-  inputGuardArgs:  parsedParams?.inputGuardArgs  ?? defaultScanners,
-  outputGuardArgs: parsedParams?.outputGuardArgs ?? defaultScanners,
+  inputGuardArgs:
+    parsedParams?.inputGuardArgs ??
+    llmInputGuardArgumentsDefault,
+
+  outputGuardArgs:
+    parsedParams?.outputGuardArgs ??
+    llmOutputGuardArgumentsDefault,
 };
+console.log("INPUT GUARD", parameters.inputGuardArgs);
+console.log("OUTPUT GUARD", parameters.outputGuardArgs);
 
 return { data: { details, parameters }, error: undefined };
       },

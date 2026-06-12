@@ -10,6 +10,12 @@ timeout /t 2
 start "Retriever" cmd /k "cd retrievers && python main.py"
 timeout /t 2
 start "Reranker" cmd /k "cd reranks && python main.py"
+timeout /t 2
+start "LLM" cmd /k "cd llm && python main.py"
+timeout /t 2
+start "Guadrails" cmd /k "cd guardrails && python main.py"
+timeout /t 2
+start "Late Chunking" cmd /k "cd late_chunking && python main.py"
 
 echo Tous les services démarrés !
 echo.
@@ -18,4 +24,7 @@ echo   Text Extractor : http://localhost:6000
 echo   Text Splitter  : http://localhost:6001
 echo   Embeddings     : http://localhost:6002
 echo   Retriever      : http://localhost:6003
-echo   Reranker       : http://localhost:6004
+echo   Reranker       : http://localhost:6004  
+echo   LLM            : http://localhost:6005
+echo   Guadrails      : http://localhost:6006 
+echo   Late Chunking  : http://localhost:6007  

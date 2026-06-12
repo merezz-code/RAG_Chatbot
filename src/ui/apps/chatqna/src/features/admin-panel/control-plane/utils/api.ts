@@ -3,8 +3,11 @@
 
 import { parseServiceDetailsResponseData as parseServiceDetailsShared } from "@intel-enterprise-rag-ui/control-plane";
 import { formatSnakeCaseToTitleCase } from "@intel-enterprise-rag-ui/utils";
-
-import { LLMInputGuardArgs } from "@/features/admin-panel/control-plane/config/chat-qna-graph/guards/llmInputGuard";
+import { llmInputGuardArgumentsDefault }
+from "@/features/admin-panel/control-plane/config/chat-qna-graph/guards/llmInputGuard";
+import { llmOutputGuardArgumentsDefault }
+from "@/features/admin-panel/control-plane/config/chat-qna-graph/guards/llmOutputGuard";
+import { LLMInputGuardArgs  } from "@/features/admin-panel/control-plane/config/chat-qna-graph/guards/llmInputGuard";
 import { LLMOutputGuardArgs } from "@/features/admin-panel/control-plane/config/chat-qna-graph/guards/llmOutputGuard";
 import { RetrieverSearchType } from "@/features/admin-panel/control-plane/config/chat-qna-graph/retriever";
 import {
@@ -74,25 +77,14 @@ export const parseServicesParameters = (
     output_guardrail_params = {},
   } = parameters;
 
-  const defaultScanners = {
-    prompt_injection_scanner: { enabled: false },
-    ban_substrings_scanner: { enabled: false, substrings: [] },
-    code_scanner: { enabled: false },
-    invisible_text_scanner: { enabled: false },
-    regex_scanner: { enabled: false, patterns: [] },
-    secrets_scanner: { enabled: false },
-    sentiment_scanner: { enabled: false, threshold: -0.5 },
-    token_limit_scanner: { enabled: false, limit: 1000, encoding_name: "cl100k_base" },
-    toxicity_scanner: { enabled: false, threshold: 0.5, match_type: "full_match" },
-  };
 
   const safeInputGuard = {
-    ...defaultScanners,
+    ...llmInputGuardArgumentsDefault,
     ...input_guardrail_params,
   } as unknown as LLMInputGuardArgs;     // ← Cast nécessaire
 
   const safeOutputGuard = {
-    ...defaultScanners,
+    ...llmOutputGuardArgumentsDefault,
     ...output_guardrail_params,
   } as unknown as LLMOutputGuardArgs;    // ← Cast nécessaire
 

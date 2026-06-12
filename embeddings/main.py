@@ -11,6 +11,7 @@ print("✅ Modèle prêt")
 
 class EmbeddingRequest(BaseModel):
     input: str | list[str]
+    
 
 class EmbeddingResponse(BaseModel):
     embeddings: list[list[float]]
@@ -28,6 +29,7 @@ async def embed(request: EmbeddingRequest):
         embeddings=[v.tolist() for v in vectors],
         model="BAAI/bge-small-en-v1.5"
     )
+
 
 if __name__ == "__main__":
     import uvicorn
