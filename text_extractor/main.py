@@ -1,16 +1,15 @@
 import os
 import tempfile
 import shutil
-import openpyxl
 import docx2txt
+import pandas as pd
+import sys
+import re
+from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from pypdf import PdfReader
-from pptx import Presentation
-import sys
-from pathlib import Path
 
 ROOT_DIR = Path(__file__).parent.parent
 sys.path.append(str(ROOT_DIR))
@@ -33,10 +32,7 @@ class ExtractResponse(BaseModel):
 # App
 # ─────────────────────────────────────────────
 
-app = FastAPI(
-    title="Text Extractor Service",
-    version="1.0.0"
-)
+app = FastAPI(title="Text Extractor Service", version="1.0.2")
 
 app.add_middleware(
     CORSMiddleware,
@@ -50,16 +46,74 @@ app.add_middleware(
 # ─────────────────────────────────────────────
 
 def extract_pdf(path: str):
-    reader = PdfReader(path)
+    """
+    FIX FINAL : remplace pypdf par pdfplumber.
+    pypdf ratait complètement les tableaux multi-colonnes (ex: tableau
+    Updates/Changes du TDCS) — les cellules de certaines colonnes étaient
+    silencieusement ignorées, rendant ETXADM-493 introuvable même après
+    extraction.
+    pdfplumber extrait page par page en combinant :
+    - extract_tables() pour les tableaux structurés → chaque ligne devient
+      "COL1 | COL2 | COL3" avec les valeurs nettoyées
+    - extract_text() pour le texte hors tableau
+    """
+    import pdfplumber
 
-    pages = len(reader.pages)
+    text_blocks = []
 
-    text = "\n".join(
-        page.extract_text() or ""
-        for page in reader.pages
-    )
+    with pdfplumber.open(path) as pdf:
+        pages = len(pdf.pages)
 
-    return text, pages
+        for page_num, page in enumerate(pdf.pages, start=1):
+
+            # 1. Extraire les tableaux de la page
+            tables = page.extract_tables()
+            table_bboxes = []
+
+            for table in tables:
+                # Récupérer les bounding boxes des tableaux pour les exclure
+                # du texte brut (évite les doublons)
+                bbox = page.find_tables()
+                if bbox:
+                    for t in bbox:
+                        table_bboxes.append(t.bbox)
+
+                # Convertir chaque ligne du tableau en phrase lisible
+                for row in table:
+                    if not row:
+                        continue
+                    cells = []
+                    for cell in row:
+                        if cell is None:
+                            continue
+                        # Nettoyer les retours à la ligne internes aux cellules
+                        clean = str(cell).replace("\n", " ").strip()
+                        clean = re.sub(r'-\s+(\d)', r'-\1', clean)
+                        if clean:
+                            cells.append(clean)
+                    if cells:
+                        text_blocks.append(" | ".join(cells))
+
+            # 2. Extraire le texte hors tableau
+            try:
+                if table_bboxes:
+                    # Exclure les zones de tableau du texte brut
+                    remaining = page
+                    for bbox in table_bboxes:
+                        try:
+                            remaining = remaining.outside_bbox(bbox)
+                        except Exception:
+                            pass
+                    page_text = remaining.extract_text() or ""
+                else:
+                    page_text = page.extract_text() or ""
+            except Exception:
+                page_text = page.extract_text() or ""
+
+            if page_text.strip():
+                text_blocks.append(page_text.strip())
+
+    return "\n\n".join(text_blocks), pages
 
 
 def extract_docx(path: str):
@@ -67,32 +121,118 @@ def extract_docx(path: str):
     return text, 1
 
 
+def _row_contains_header_keywords(row) -> bool:
+    for val in row.values:
+        if pd.isna(val):
+            continue
+        s = str(val)
+        if "GDSSRC" in s or "3RDNAM" in s:
+            return True
+    return False
+
+
+def _looks_like_header_row(row) -> bool:
+    non_null = [v for v in row.values if pd.notna(v)]
+    if len(non_null) < 2:
+        return False
+
+    def is_text_like(v) -> bool:
+        if not isinstance(v, str):
+            return False
+        stripped = v.replace('.', '', 1).replace('-', '', 1).strip()
+        return not stripped.isdigit()
+
+    text_like_count = sum(1 for v in non_null if is_text_like(v))
+    return text_like_count >= 2
+
+
+def detect_header_row(df_raw: pd.DataFrame) -> tuple[int, bool]:
+    for idx, row in df_raw.iterrows():
+        if _row_contains_header_keywords(row):
+            return idx, True
+    for idx, row in df_raw.iterrows():
+        if _looks_like_header_row(row):
+            return idx, False
+    return 0, False
+
+
 def extract_xlsx(path: str):
-    workbook = openpyxl.load_workbook(path)
+    text_blocks = []
+    ext = os.path.splitext(path)[1].lower()
 
-    text = ""
+    if ext == ".csv":
+        encoding_used = "utf-8"
+        try:
+            df_raw = pd.read_csv(path, header=None, encoding=encoding_used)
+        except UnicodeDecodeError:
+            encoding_used = "latin-1"
+            df_raw = pd.read_csv(path, header=None, encoding=encoding_used)
 
-    for sheet in workbook.worksheets:
-        for row in sheet.iter_rows(values_only=True):
-            values = [str(cell) for cell in row if cell is not None]
+        if df_raw.empty:
+            return "", 1
 
-            if values:
-                text += " ".join(values) + "\n"
+        df = pd.read_csv(path, skiprows=0, encoding=encoding_used)
+        df.columns = [str(c).strip().replace("\n", "") for c in df.columns]
 
-    return text, workbook.sheetnames.__len__()
+        text_blocks.append("## Feuille : CSV_Data")
+        for index, row in df.iterrows():
+            row_items = []
+            for col_name in df.columns:
+                val = row[col_name]
+                if "Unnamed:" in str(col_name):
+                    continue
+                if pd.notna(val) and str(val).strip() != "":
+                    row_items.append(f"{str(col_name).upper().strip()}: {str(val).strip().replace(chr(10), ' ')}")
+            if row_items:
+                text_blocks.append(" | ".join(row_items))
+
+        return "\n\n".join(text_blocks), 1
+
+    with pd.ExcelFile(path) as excel_file:
+        total_sheets = len(excel_file.sheet_names)
+
+        for sheet_name in excel_file.sheet_names:
+            df_raw = pd.read_excel(excel_file, sheet_name=sheet_name, header=None)
+            if df_raw.empty:
+                continue
+
+            header_row_index, has_specific_header = detect_header_row(df_raw)
+            df = pd.read_excel(excel_file, sheet_name=sheet_name, skiprows=header_row_index)
+            df.columns = [str(c).strip().replace("\n", "") for c in df.columns]
+            df.dropna(how='all', inplace=True)
+
+            if has_specific_header and 'GDSSRC' in df.columns:
+                df = df[df['GDSSRC'] != 'good/service']
+
+            text_blocks.append(f"## Feuille : {sheet_name}")
+            for index, row in df.iterrows():
+                row_items = []
+                for col_name in df.columns:
+                    val = row[col_name]
+                    if "Unnamed:" in str(col_name):
+                        continue
+                    if pd.notna(val) and str(val).strip() != "":
+                        clean_col = str(col_name).upper().strip()
+                        clean_val = str(val).strip().replace("\n", " ")
+                        row_items.append(f"{clean_col}: {clean_val}")
+                if row_items:
+                    text_blocks.append(" | ".join(row_items))
+
+    return "\n\n".join(text_blocks), total_sheets
 
 
 def extract_pptx(path: str):
-    prs = Presentation(path)
-
-    text = ""
-
-    for slide in prs.slides:
-        for shape in slide.shapes:
-            if hasattr(shape, "text"):
-                text += shape.text + "\n"
-
-    return text, len(prs.slides)
+    try:
+        from pptx import Presentation
+        prs = Presentation(path)
+        text_runs = []
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if hasattr(shape, "text") and shape.text.strip():
+                    text_runs.append(shape.text.strip())
+        return "\n".join(text_runs), len(prs.slides)
+    except Exception:
+        return "Extraction PPTX non configurée ou fichier corrompu.", 1
 
 
 def extract_txt(path: str):
@@ -105,10 +245,7 @@ def extract_txt(path: str):
 
 @app.get("/health")
 async def health():
-    return {
-        "status": "ok",
-        "service": "text_extractor"
-    }
+    return {"status": "ok", "service": "text_extractor"}
 
 
 @app.post("/extract", response_model=ExtractResponse)
@@ -119,50 +256,32 @@ async def extract(file: UploadFile = File(...)):
     ext = os.path.splitext(filename)[1].lower()
 
     supported = [
-        ".pdf",
-        ".docx",
-        ".xlsx",
-        ".pptx",
-        ".txt",
-        ".md"
+        ".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md",
+        ".adoc", ".html", ".xml", ".json", ".jsonl", ".yaml",
+        ".xls", ".csv"
     ]
 
     if ext not in supported:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Format non supporté : {ext}"
-        )
+        raise HTTPException(status_code=400, detail=f"Format non supporté : {ext}")
 
-    with tempfile.NamedTemporaryFile(
-        delete=False,
-        suffix=ext
-    ) as tmp:
-
+    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
 
     try:
-
         if ext == ".pdf":
             text, pages = extract_pdf(tmp_path)
-
         elif ext == ".docx":
             text, pages = extract_docx(tmp_path)
-
-        elif ext == ".xlsx":
+        elif ext in [".xlsx", ".xls", ".csv"]:
             text, pages = extract_xlsx(tmp_path)
-
         elif ext == ".pptx":
             text, pages = extract_pptx(tmp_path)
-
         else:
             text, pages = extract_txt(tmp_path)
 
         if not text.strip():
-            raise HTTPException(
-                status_code=422,
-                detail="Aucun texte extrait."
-            )
+            raise HTTPException(status_code=422, detail="Aucun texte extrait.")
 
         return ExtractResponse(
             filename=filename,
@@ -174,26 +293,13 @@ async def extract(file: UploadFile = File(...)):
 
     except HTTPException:
         raise
-
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        )
-
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
-# ─────────────────────────────────────────────
-# Main
-# ─────────────────────────────────────────────
 
 if __name__ == "__main__":
     import uvicorn
-
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=settings.text_extractor_port
-    )
+    uvicorn.run(app, host="0.0.0.0", port=settings.text_extractor_port)

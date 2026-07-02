@@ -159,39 +159,6 @@ importers:
         specifier: ^5.0.1
         version: 5.1.4(typescript@5.9.2)(vite@5.4.21(@types/node@22.17.0)(sass@1.90.0))
 
-  apps/audioqna:
-    dependencies:
-      '@intel-enterprise-rag-ui/auth':
-        specifier: workspace:^
-        version: link:../../packages/auth
-      '@intel-enterprise-rag-ui/chat':
-        specifier: workspace:^
-        version: link:../../packages/chat
-      '@intel-enterprise-rag-ui/components':
-        specifier: workspace:^
-        version: link:../../packages/components
-      '@intel-enterprise-rag-ui/control-plane':
-        specifier: workspace:^
-        version: link:../../packages/control-plane
-      '@intel-enterprise-rag-ui/icons':
-        specifier: workspace:^
-        version: link:../../packages/icons
-      '@intel-enterprise-rag-ui/input-validation':
-        specifier: workspace:^
-        version: link:../../packages/input-validation
-      '@intel-enterprise-rag-ui/layouts':
-        specifier: workspace:^
-        version: link:../../packages/layouts
-      '@intel-enterprise-rag-ui/markdown':
-        specifier: workspace:^
-        version: link:../../packages/markdown
-      '@intel-enterprise-rag-ui/tailwind-theme':
-        specifier: workspace:^
-        version: link:../../packages/tailwind-theme
-      '@intel-enterprise-rag-ui/utils':
-        specifier: workspace:^
-        version: link:../../packages/utils
-
   apps/chatqna:
     dependencies:
       '@intel-enterprise-rag-ui/auth':
@@ -1808,6 +1775,7 @@ packages:
 
   '@ungap/structured-clone@1.3.0':
     resolution: {integrity: sha512-WmoN8qaIAo7WTYWbAZuG8PYEhn5fkz7dZrqTBZ7dtt//lL2Gwms1IcnQ5yHqjDfX8Ft5j4YzDM23f87zBfDe9g==}
+    deprecated: Potential CWE-502 - Update to 1.3.1 or higher
 
   '@vitejs/plugin-react@4.7.0':
     resolution: {integrity: sha512-gUu9hwfWvvEDBBmgtAowQCojwZmJ5mcLn3aufeCsitijs3+f2NsrPtlAWIR6OPiqljl96GVCUbLe0HyqIpVaoA==}
@@ -3383,6 +3351,7 @@ packages:
   tsconfck@3.1.6:
     resolution: {integrity: sha512-ks6Vjr/jEw0P1gmOVwutM3B7fWxoWBL2KRDb1JfqGVawBmO5UsvmWOQFGHBPl5yxYz4eERr19E6L7NMv+Fej4w==}
     engines: {node: ^18 || >=20}
+    deprecated: unmaintained
     hasBin: true
     peerDependencies:
       typescript: ^5.0.0
@@ -3470,6 +3439,7 @@ packages:
 
   uuid@10.0.0:
     resolution: {integrity: sha512-8XkAphELsDnEGrDxUOHB3RGvXz6TeuYSGEZBOjtTtPm2lwhGBjLgOzLHB63IUWfBpNucQjND6d3AOudO+H3RWQ==}
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
   vite-plugin-dts@4.5.4:

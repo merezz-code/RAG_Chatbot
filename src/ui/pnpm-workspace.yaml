@@ -2,6 +2,10 @@ packages:
   - apps/*
   - packages/*
 
+allowBuilds:
+  '@parcel/watcher': true
+  esbuild: true
+
 overrides:
   esbuild@<=0.24.2: ">=0.25.0"
   js-yaml@<4.1.1: ">=4.1.1"

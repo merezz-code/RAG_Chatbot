@@ -37,6 +37,45 @@ class LLMRequest(BaseModel):
 
 class LLMResponse(BaseModel):
     answer: str
+    contextualized_question: Optional[str] = None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Helper : Réécriture de la question basée sur l'historique (Multi-document)
+# ──────────────────────────────────────────────────────────────────────────────
+def contextualize_user_query(question: str, history: List[ChatMessage], llm_client: AzureChatOpenAI) -> str:
+    """
+    Analyse l'historique pour reformuler la question de manière autonome
+    si l'utilisateur utilise des termes relatifs ("ce ticket", "cette ligne", "la date de l'export").
+    """
+    if not history:
+        return question
+
+    # Construction d'un mini historique textuel pour le prompt de contextualisation
+    formatted_history = ""
+    for msg in history[-4:]:  # On prend les 4 derniers messages pour garder de la vélocité
+        role_label = "Utilisateur" if msg.role.lower() == "user" else "Assistant"
+        formatted_history += f"{role_label}: {msg.content}\n"
+
+    prompt_rewriter = (
+        "Compte tenu de l'historique de discussion suivant et d'une question de suivi, "
+        "reformulez la question pour qu'elle devienne une question autonome (stand-alone), "
+        "en y incluant explicitement les entités nommées, codes de tickets (ex: ETXADM, JIRA), "
+        "ou noms de fichiers (ex: TDCS, PDF, Excel) mentionnés précédemment.\n"
+        "Ne répondez pas à la question, retournez UNIQUEMENT la question reformulée.\n\n"
+        f"Historique :\n{formatted_history}\n"
+        f"Question de suivi : {question}\n"
+        "Question autonome reformulée :"
+    )
+    
+    try:
+        res = llm_client.invoke([SystemMessage(content=prompt_rewriter)])
+        cleaned_query = res.content.strip()
+        if cleaned_query:
+            return cleaned_query
+    except Exception:
+        pass # Fallback sur la question initiale en cas de timeout/erreur
+    return question
 
 
 @app.get("/health")
@@ -62,8 +101,12 @@ async def generate(request: LLMRequest):
                 else getattr(settings, "llm_max_tokens", 1024),
         )
 
-        # context = system_prompt_template déjà rempli par l'Orchestrator
-        # question = user_prompt_template déjà rempli par l'Orchestrator
+        # 1. Traitement de contextualisation universel (Excel, PDF, TDCS...)
+        final_question = request.question
+        if request.history:
+            final_question = contextualize_user_query(request.question, request.history, llm)
+
+        # 2. Construction de la structure finale des messages pour la réponse finale
         messages = [SystemMessage(content=request.context)]
 
         for msg in request.history or []:
@@ -72,10 +115,15 @@ async def generate(request: LLMRequest):
             elif msg.role.lower() == "assistant":
                 messages.append(AIMessage(content=msg.content))
 
-        messages.append(HumanMessage(content=request.question))
+        # On envoie la question enrichie au LLM pour qu'il trouve l'info sans ambiguïté
+        messages.append(HumanMessage(content=final_question))
 
         response = llm.invoke(messages)
-        return LLMResponse(answer=response.content)
+        
+        return LLMResponse(
+            answer=response.content,
+            contextualized_question=final_question if final_question != request.question else None
+        )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -6,8 +6,13 @@ from fastembed import TextEmbedding
 app = FastAPI()
 
 print("⏳ Chargement du modèle d'embedding...")
-embedder = TextEmbedding(model_name="BAAI/bge-base-en-v1.5")  # 768 dims
-print("✅ Modèle prêt")
+
+try:
+    embedder = TextEmbedding(model_name="BAAI/bge-base-en-v1.5")
+    print("✅ Modèle prêt")
+except Exception as e:
+    print(f"❌ Erreur chargement modèle : {e}")
+    raise
 
 class EmbeddingRequest(BaseModel):
     input: str | list[str]
