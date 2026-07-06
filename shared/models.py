@@ -151,11 +151,12 @@ class ExtractResponse(BaseModel):
 class SplitRequest(BaseModel):
     """
     chunk_size / chunk_overlap : envoyés par l'Orchestrator depuis Admin.
+    Alignés sur la configuration RAG du projet : 1000 / 150.
     """
     text:          str
     filename:      str           = "document"
-    chunk_size:    int           = 500
-    chunk_overlap: int           = 50
+    chunk_size:    int           = 1000
+    chunk_overlap: int           = 150
 
 
 class ChunkDocument(BaseModel):

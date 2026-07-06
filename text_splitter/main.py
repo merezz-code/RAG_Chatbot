@@ -20,8 +20,8 @@ class SplitRequest(BaseModel):
     model_config = {"extra": "ignore"}
     text: str
     filename: Optional[str] = "document"
-    chunk_size: int = Field(default=4000, gt=0, le=4000)
-    chunk_overlap: int = Field(default=800, ge=0, le=1000)
+    chunk_size: int = Field(default=1000, gt=0, le=4000)
+    chunk_overlap: int = Field(default=150, ge=0, le=1000)
 
 class ChunkDocument(BaseModel):
     page_content: str
@@ -39,10 +39,10 @@ class SplitResponse(BaseModel):
 
 class RecursiveCharacterTextSplitter:
 
-    def __init__(self, chunk_size=3000, chunk_overlap=800, separators=None):
+    def __init__(self, chunk_size=1000, chunk_overlap=150, separators=None):
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        self.separators = separators or ["\n\n", "\n", ". ", " ", ""]
+        self.separators = separators or ["\n\n", "\n", ". ", ", ", ": ", " ", ""]
 
     def _preprocess_text(self, text: str) -> str:
         """
@@ -70,64 +70,31 @@ class RecursiveCharacterTextSplitter:
 
     def split_text(self, text: str) -> List[str]:
         clean_text = self._preprocess_text(text)
-        raw_chunks = self._split_text_raw(clean_text, self.separators)
-        return self._apply_overlap(raw_chunks)
+        return self.recursive_text_splitter(clean_text)
 
-    def _split_text_raw(self, text: str, separators: List[str]) -> List[str]:
-        """Découpe BRUTE sans overlap — appliqué une seule fois globalement."""
-        if len(text) <= self.chunk_size:
-            return [text]
-
-        separator = separators[-1]
-        for sep in separators:
-            if sep and sep in text:
-                separator = sep
-                break
-
-        if separator == "":
-            return self._split_by_length(text)
-
-        splits = text.split(separator)
-        chunks = []
-        current = ""
-
-        for piece in splits:
-            candidate = piece if not current else current + separator + piece
-            if len(candidate) <= self.chunk_size:
-                current = candidate
-            else:
-                if current:
-                    chunks.append(current)
-                if len(piece) > self.chunk_size:
-                    remaining = separators[1:] if len(separators) > 1 else [""]
-                    chunks.extend(self._split_text_raw(piece, remaining))
-                    current = ""
-                else:
-                    current = piece
-
-        if current:
-            chunks.append(current)
-
-        return chunks
-
-    def _split_by_length(self, text: str) -> List[str]:
+    def recursive_text_splitter(self, text: str) -> List[str]:
         chunks = []
         start = 0
-        while start < len(text):
-            chunks.append(text[start:start + self.chunk_size])
-            start += self.chunk_size - self.chunk_overlap
-        return chunks
+        text_len = len(text)
 
-    def _apply_overlap(self, chunks: List[str]) -> List[str]:
-        """Overlap appliqué UNE SEULE FOIS sur la liste plate finale."""
-        if self.chunk_overlap <= 0 or len(chunks) <= 1:
-            return chunks
-        result = [chunks[0]]
-        for i in range(1, len(chunks)):
-            previous = chunks[i - 1]
-            actual_overlap = min(self.chunk_overlap, len(previous))
-            result.append(previous[-actual_overlap:] + chunks[i])
-        return result
+        while start < text_len:
+            end = min(start + self.chunk_size, text_len)
+            if end < text_len:
+                while end < text_len and text[end] not in " .,:;\n":
+                    end += 1
+            chunk = text[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+
+            if end >= text_len:
+                break
+
+            new_start = end - self.chunk_overlap
+            if new_start <= start:
+                new_start = end
+            start = new_start
+
+        return chunks
 
 
 # ─────────────────────────────────────────────

@@ -1,7 +1,6 @@
 import os
 import tempfile
 import shutil
-import docx2txt
 import pandas as pd
 import sys
 import re
@@ -10,6 +9,28 @@ from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+try:
+    import fitz
+except ImportError:  # pragma: no cover - optional dependency
+    fitz = None
+
+try:
+    from docx import Document
+except ImportError:  # pragma: no cover - optional dependency
+    Document = None
+
+try:
+    import openpyxl
+except ImportError:  # pragma: no cover - optional dependency
+    openpyxl = None
+
+try:
+    import pytesseract
+    from PIL import Image
+except ImportError:  # pragma: no cover - optional dependency
+    pytesseract = None
+    Image = None
 
 ROOT_DIR = Path(__file__).parent.parent
 sys.path.append(str(ROOT_DIR))
@@ -46,79 +67,51 @@ app.add_middleware(
 # ─────────────────────────────────────────────
 
 def extract_pdf(path: str):
-    """
-    FIX FINAL : remplace pypdf par pdfplumber.
-    pypdf ratait complètement les tableaux multi-colonnes (ex: tableau
-    Updates/Changes du TDCS) — les cellules de certaines colonnes étaient
-    silencieusement ignorées, rendant ETXADM-493 introuvable même après
-    extraction.
-    pdfplumber extrait page par page en combinant :
-    - extract_tables() pour les tableaux structurés → chaque ligne devient
-      "COL1 | COL2 | COL3" avec les valeurs nettoyées
-    - extract_text() pour le texte hors tableau
-    """
-    import pdfplumber
+    if fitz is None:
+        raise RuntimeError("PyMuPDF n'est pas installé. Installez 'pymupdf' pour extraire les PDF.")
 
+    doc = fitz.open(path)
     text_blocks = []
-
-    with pdfplumber.open(path) as pdf:
-        pages = len(pdf.pages)
-
-        for page_num, page in enumerate(pdf.pages, start=1):
-
-            # 1. Extraire les tableaux de la page
-            tables = page.extract_tables()
-            table_bboxes = []
-
-            for table in tables:
-                # Récupérer les bounding boxes des tableaux pour les exclure
-                # du texte brut (évite les doublons)
-                bbox = page.find_tables()
-                if bbox:
-                    for t in bbox:
-                        table_bboxes.append(t.bbox)
-
-                # Convertir chaque ligne du tableau en phrase lisible
-                for row in table:
-                    if not row:
-                        continue
-                    cells = []
-                    for cell in row:
-                        if cell is None:
-                            continue
-                        # Nettoyer les retours à la ligne internes aux cellules
-                        clean = str(cell).replace("\n", " ").strip()
-                        clean = re.sub(r'-\s+(\d)', r'-\1', clean)
-                        if clean:
-                            cells.append(clean)
-                    if cells:
-                        text_blocks.append(" | ".join(cells))
-
-            # 2. Extraire le texte hors tableau
-            try:
-                if table_bboxes:
-                    # Exclure les zones de tableau du texte brut
-                    remaining = page
-                    for bbox in table_bboxes:
-                        try:
-                            remaining = remaining.outside_bbox(bbox)
-                        except Exception:
-                            pass
-                    page_text = remaining.extract_text() or ""
-                else:
-                    page_text = page.extract_text() or ""
-            except Exception:
-                page_text = page.extract_text() or ""
-
-            if page_text.strip():
-                text_blocks.append(page_text.strip())
-
-    return "\n\n".join(text_blocks), pages
+    for page in doc:
+        page_text = page.get_text("text").strip()
+        if page_text:
+            text_blocks.append(page_text)
+    doc.close()
+    return "\n\n".join(text_blocks), len(text_blocks)
 
 
 def extract_docx(path: str):
-    text = docx2txt.process(path)
+    if Document is None:
+        raise RuntimeError("python-docx n'est pas installé.")
+
+    doc = Document(path)
+    paragraphs = [p.text.strip() for p in doc.paragraphs if p.text and p.text.strip()]
+    return "\n".join(paragraphs), 1
+
+
+def extract_doc(path: str):
+    try:
+        import aspose.words as aw
+    except ImportError as exc:
+        raise RuntimeError("Aspose.Words n'est pas installé pour les fichiers .doc.") from exc
+
+    doc = aw.Document(path)
+    text = doc.to_string(aw.SaveFormat.TEXT)
     return text, 1
+
+
+def extract_image(path: str):
+    if Image is None or pytesseract is None:
+        raise RuntimeError("Pillow et pytesseract sont requis pour l'OCR des images.")
+
+    if os.name == "nt":
+        default_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+        if os.path.exists(default_path):
+            pytesseract.pytesseract.tesseract_cmd = default_path
+
+    with Image.open(path) as image:
+        text = pytesseract.image_to_string(image, lang="fra+eng")
+    return text.strip(), 1
 
 
 def _row_contains_header_keywords(row) -> bool:
@@ -175,7 +168,7 @@ def extract_xlsx(path: str):
         df.columns = [str(c).strip().replace("\n", "") for c in df.columns]
 
         text_blocks.append("## Feuille : CSV_Data")
-        for index, row in df.iterrows():
+        for _, row in df.iterrows():
             row_items = []
             for col_name in df.columns:
                 val = row[col_name]
@@ -187,6 +180,22 @@ def extract_xlsx(path: str):
                 text_blocks.append(" | ".join(row_items))
 
         return "\n\n".join(text_blocks), 1
+
+    if ext in [".xlsx", ".xlsm"] and openpyxl is not None:
+        workbook = openpyxl.load_workbook(path, data_only=True, read_only=True)
+        try:
+            for sheet_name in workbook.sheetnames:
+                sheet = workbook[sheet_name]
+                lines = [f"## Feuille : {sheet_name}"]
+                for row in sheet.iter_rows(values_only=True):
+                    row_values = [str(cell).strip() for cell in row if cell is not None and str(cell).strip()]
+                    if row_values:
+                        lines.append(" | ".join(row_values))
+                if len(lines) > 1:
+                    text_blocks.extend(lines)
+            return "\n\n".join(text_blocks), len(workbook.sheetnames)
+        finally:
+            workbook.close()
 
     with pd.ExcelFile(path) as excel_file:
         total_sheets = len(excel_file.sheet_names)
@@ -205,7 +214,7 @@ def extract_xlsx(path: str):
                 df = df[df['GDSSRC'] != 'good/service']
 
             text_blocks.append(f"## Feuille : {sheet_name}")
-            for index, row in df.iterrows():
+            for _, row in df.iterrows():
                 row_items = []
                 for col_name in df.columns:
                     val = row[col_name]
@@ -236,7 +245,7 @@ def extract_pptx(path: str):
 
 
 def extract_txt(path: str):
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
         return f.read(), 1
 
 # ─────────────────────────────────────────────
@@ -256,9 +265,9 @@ async def extract(file: UploadFile = File(...)):
     ext = os.path.splitext(filename)[1].lower()
 
     supported = [
-        ".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md",
-        ".adoc", ".html", ".xml", ".json", ".jsonl", ".yaml",
-        ".xls", ".csv"
+        ".pdf", ".docx", ".doc", ".xlsx", ".xlsm", ".pptx", ".txt", ".md",
+        ".adoc", ".html", ".xml", ".json", ".jsonl", ".yaml", ".yml",
+        ".xls", ".csv", ".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"
     ]
 
     if ext not in supported:
@@ -273,10 +282,14 @@ async def extract(file: UploadFile = File(...)):
             text, pages = extract_pdf(tmp_path)
         elif ext == ".docx":
             text, pages = extract_docx(tmp_path)
-        elif ext in [".xlsx", ".xls", ".csv"]:
+        elif ext == ".doc":
+            text, pages = extract_doc(tmp_path)
+        elif ext in [".xlsx", ".xlsm", ".xls", ".csv"]:
             text, pages = extract_xlsx(tmp_path)
         elif ext == ".pptx":
             text, pages = extract_pptx(tmp_path)
+        elif ext in [".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"]:
+            text, pages = extract_image(tmp_path)
         else:
             text, pages = extract_txt(tmp_path)
 
